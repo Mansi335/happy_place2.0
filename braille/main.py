@@ -1,44 +1,61 @@
 import tkinter as tk
 from PIL import Image, ImageTk
-from audio_player import play_sound
-from braille_data import braille_map
+import os
+from whisper_speech import speech_to_text
+from audio_record import record_audio
 
-root = tk.Tk()
-root.title("Braille Learning App")
-root.geometry("600x500")
+DATASET = "dataset"
+letters = [f for f in os.listdir(DATASET) if not f.startswith('.')]
+letters.sort()
+index = 0
 
-title = tk.Label(root, text="Click Braille to Hear Sound", font=("Arial", 16))
-title.pack(pady=20)
+def next_letter():
+    global index
+    index += 1
+    if index >= len(letters):
+        result_label.config(text="You completed all letters!")
+        return
+    load_letter()
 
-frame = tk.Frame(root)
-frame.pack()
+def check_speech():
+    record_audio()
+    spoken = speech_to_text("user_audio.wav")
+    correct = letters[index]
 
-images = {}
+    if correct in spoken:
+        result_label.config(text="Correct! Moving to next letter.")
+        next_letter()
+    else:
+        result_label.config(text="Wrong! Try again.")
 
-def on_click(letter):
-    sound_path = braille_map[letter]["sound"]
-    play_sound(sound_path)
+def load_letter():
+    letter = letters[index]
+    img_path = os.path.join(DATASET, letter, "image.png")
 
-row = 0
-col = 0
-
-for letter in braille_map:
-    img_path = braille_map[letter]["image"]
     img = Image.open(img_path)
-    img = img.resize((100, 100))
+    img = img.resize((200,200))
     photo = ImageTk.PhotoImage(img)
 
-    images[letter] = photo
+    panel.config(image=photo)
+    panel.image = photo
+    letter_label.config(text=f"Alphabet: {letter}")
 
-    btn = tk.Button(frame, image=photo, command=lambda l=letter: on_click(l))
-    btn.grid(row=row, column=col, padx=10, pady=10)
+root = tk.Tk()
+root.title("Braille Speech Learning")
+root.geometry("400x400")
 
-    label = tk.Label(frame, text=letter)
-    label.grid(row=row+1, column=col)
+panel = tk.Label(root)
+panel.pack(pady=20)
 
-    col += 1
-    if col == 5:
-        col = 0
-        row += 2
+letter_label = tk.Label(root, text="", font=("Arial", 16))
+letter_label.pack()
+
+speak_btn = tk.Button(root, text="Speak Letter", command=check_speech)
+speak_btn.pack(pady=20)
+
+result_label = tk.Label(root, text="", font=("Arial", 12))
+result_label.pack()
+
+load_letter()
 
 root.mainloop()
