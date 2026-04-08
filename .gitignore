@@ -37,3 +37,14 @@ build/
 *.njsproj
 *.sln
 *.sw?
+
+# Audio files
+*.wav
+
+# ML/DL models
+*.h5
+*.pth
+*.pb
+
+# Temporary files
+*.tmp
