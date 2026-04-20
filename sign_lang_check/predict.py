@@ -3,36 +3,61 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import os
+from collections import deque
 from tensorflow.keras.models import load_model
 
-actions = ['Hello', 'ThankYou', 'GoodMorning', 'Sorry', 'HowAreYou']
-model = load_model('model/lstm_model.h5')
+ACTIONS = ['Hello', 'ThankYou', 'GoodMorning', 'Sorry', 'HowAreYou']
+SEQUENCE_LENGTH = 30
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_DIR = os.path.join(BASE_DIR, 'model')
+MODEL_PATH = os.path.join(MODEL_DIR, 'lstm_model.h5')
+ACTIONS_PATH = os.path.join(MODEL_DIR, 'actions.npy')
+
+if not os.path.exists(MODEL_PATH):
+    raise FileNotFoundError(f"Model not found at {MODEL_PATH}. Run train_model.py first.")
+
+if os.path.exists(ACTIONS_PATH):
+    ACTIONS = np.load(ACTIONS_PATH, allow_pickle=True).tolist()
+
+model = load_model(MODEL_PATH)
 
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands()
+hands = mp_hands.Hands(
+    static_image_mode=False,
+    max_num_hands=1,
+    model_complexity=1,
+    min_detection_confidence=0.6,
+    min_tracking_confidence=0.6,
+)
 mp_draw = mp.solutions.drawing_utils
 
 cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
 sequence = []
+prob_history = deque(maxlen=6)
 
 import time
 
 # Interactive game variables
 target_idx = 0
 correct_message_time = 0
+correct_streak = 0
+STREAK_REQUIRED = 4
+MIN_CONFIDENCE = 0.6
 
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
+    frame = cv2.flip(frame, 1)
     image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = hands.process(image)
     
     current_time = time.time()
     
-    if target_idx < len(actions):
-        target_word = actions[target_idx]
+    if target_idx < len(ACTIONS):
+        target_word = ACTIONS[target_idx]
         
         cv2.putText(frame, f"Please sign: {target_word}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
         
@@ -46,23 +71,45 @@ while True:
                     landmarks.append(lm.y)
                 
                 sequence.append(landmarks)
-                if len(sequence) > 30:
+                if len(sequence) > SEQUENCE_LENGTH:
                     sequence.pop(0)
 
-            if len(sequence) == 30:
+            if len(sequence) == SEQUENCE_LENGTH:
                 res = model.predict(np.expand_dims(sequence, axis=0), verbose=0)[0]
-                predicted_idx = np.argmax(res)
-                confidence = res[predicted_idx]
-                predicted_word = actions[predicted_idx]
+                prob_history.append(res)
+                smooth_res = np.mean(prob_history, axis=0)
+                predicted_idx = int(np.argmax(smooth_res))
+                confidence = float(smooth_res[predicted_idx])
+                predicted_word = ACTIONS[predicted_idx]
                 
                 # Show what the AI currently thinks
                 cv2.putText(frame, f"Seeing: {predicted_word} ({confidence:.2f})", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
                 
-                # If the AI predicts the correct word, even with loose confidence, move to next!
-                if predicted_word == target_word and confidence > 0.4:
+                # Require stable correct predictions across consecutive frames.
+                if predicted_word == target_word and confidence > MIN_CONFIDENCE:
+                    correct_streak += 1
+                else:
+                    correct_streak = 0
+
+                cv2.putText(
+                    frame,
+                    f"Hold steady: {correct_streak}/{STREAK_REQUIRED}",
+                    (10, 135),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 200, 0),
+                    2,
+                )
+
+                if correct_streak >= STREAK_REQUIRED:
                     correct_message_time = time.time()
                     target_idx += 1
-                    sequence = [] # Clear memory for next sign
+                    sequence = []  # Clear memory for next sign
+                    correct_streak = 0
+        else:
+            correct_streak = 0
+            sequence = []
+            prob_history.clear()
                     
         # Display success message as an overlay for 1.5 seconds WITHOUT pausing completion logic
         if current_time - correct_message_time < 1.5:
@@ -81,9 +128,11 @@ while True:
         break
     elif key == ord('n'):
         # Force skip to next word
-        if target_idx < len(actions):
+        if target_idx < len(ACTIONS):
             target_idx += 1
             sequence = []
+            correct_streak = 0
+            prob_history.clear()
 
 cap.release()
 cv2.destroyAllWindows()
