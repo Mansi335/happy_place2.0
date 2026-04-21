@@ -1,170 +1,83 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Grip, BookOpen, CheckCircle, Play, Target, Mic, RotateCcw } from "lucide-react";
+import { ArrowLeft, Grip, BookOpen, CheckCircle, Play, Target, RotateCcw } from "lucide-react";
 
-const API_BASE = "http://127.0.0.1:5000";
-
-type BrailleState = {
-  letters: string[];
-  index: number;
-  total: number;
-  current: string | null;
-  done: boolean;
-  image_filename: string | null;
+type BrailleQuestion = {
+  answer: string;
+  options: string[];
+  activeDots: number[];
 };
+
+const BRAILLE_QUESTIONS: BrailleQuestion[] = [
+  { answer: "A", options: ["A", "B", "C", "D"], activeDots: [1] },
+  { answer: "B", options: ["A", "B", "C", "D"], activeDots: [1, 2] },
+  { answer: "C", options: ["A", "B", "C", "D"], activeDots: [1, 4] },
+  { answer: "D", options: ["A", "B", "C", "D"], activeDots: [1, 4, 5] },
+  { answer: "E", options: ["E", "F", "G", "H"], activeDots: [1, 5] },
+  { answer: "F", options: ["E", "F", "G", "H"], activeDots: [1, 2, 4] },
+];
+
+const dotCoordinates: Record<number, [number, number]> = {
+  1: [60, 60],
+  2: [60, 120],
+  3: [60, 180],
+  4: [140, 60],
+  5: [140, 120],
+  6: [140, 180],
+};
+
+function createBrailleImage(activeDots: number[]) {
+  const circles = [1, 2, 3, 4, 5, 6]
+    .map((dot) => {
+      const [cx, cy] = dotCoordinates[dot];
+      const isActive = activeDots.includes(dot);
+      return `<circle cx="${cx}" cy="${cy}" r="22" fill="${isActive ? "#4b5563" : "#e5e7eb"}" />`;
+    })
+    .join("");
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="240" viewBox="0 0 220 240">
+    <rect width="220" height="240" rx="16" fill="#f8fafc"/>
+    ${circles}
+  </svg>`;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
 
 export default function InclusionLearning() {
   const [activeTab, setActiveTab] = useState("braille");
-  const [brailleState, setBrailleState] = useState<BrailleState | null>(null);
-  const [brailleLoading, setBrailleLoading] = useState(false);
+  const [quizIndex, setQuizIndex] = useState(0);
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [brailleFeedback, setBrailleFeedback] = useState<string>("");
-  const [brailleListening, setBrailleListening] = useState(false);
+  const currentQuestion = useMemo(() => BRAILLE_QUESTIONS[quizIndex] ?? null, [quizIndex]);
 
-  const fetchBrailleState = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/braille/state`);
-      if (!res.ok) throw new Error(String(res.status));
-      const data = await res.json();
-      setBrailleState(data);
-    } catch {
-      setBrailleFeedback("Start the Flask backend (backend/app.py) to use Braille test.");
-      setBrailleState(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (activeTab === "braille") void fetchBrailleState();
-  }, [activeTab, fetchBrailleState]);
-
-  const resetBraille = async () => {
-    setBrailleLoading(true);
+  const resetBraille = () => {
+    setQuizIndex(0);
+    setSelectedOption(null);
     setBrailleFeedback("");
-    try {
-      const res = await fetch(`${API_BASE}/braille/reset`, { method: "POST" });
-      if (!res.ok) throw new Error(String(res.status));
-      const data = await res.json();
-      setBrailleState(data);
-    } catch {
-      setBrailleFeedback("Could not reset — is the backend running?");
-    }
-    setBrailleLoading(false);
   };
 
-  const verifySpokenText = async (text: string) => {
-    setBrailleLoading(true);
-    setBrailleFeedback("");
-    try {
-      const res = await fetch(`${API_BASE}/braille/verify-text`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      const out = await res.json();
-      if (out.status === "correct") {
-        setBrailleFeedback(`Correct — you said a match for “${out.letter}”. Next letter!`);
-        await fetchBrailleState();
-      } else if (out.status === "done") {
-        setBrailleFeedback("All letters completed!");
-        await fetchBrailleState();
-      } else {
-        setBrailleFeedback(`Try again. Looking for something containing “${out.letter}”. Heard: “${out.spoken || ""}”`);
-      }
-    } catch {
-      setBrailleFeedback("Verify failed — check backend.");
-    }
-    setBrailleLoading(false);
-  };
-
-  const startBrowserSpeech = () => {
-    if (typeof window === "undefined") return;
-    const w = window as unknown as {
-      SpeechRecognition?: new () => {
-        lang: string;
-        interimResults: boolean;
-        maxAlternatives: number;
-        start: () => void;
-        onresult: ((ev: { results: { [k: number]: { [k: number]: { transcript: string } } } }) => void) | null;
-        onerror: (() => void) | null;
-        onend: (() => void) | null;
-      };
-      webkitSpeechRecognition?: new () => {
-        lang: string;
-        interimResults: boolean;
-        maxAlternatives: number;
-        start: () => void;
-        onresult: ((ev: { results: { [k: number]: { [k: number]: { transcript: string } } } }) => void) | null;
-        onerror: (() => void) | null;
-        onend: (() => void) | null;
-      };
-    };
-    const SpeechRecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
-    if (!SpeechRecognitionCtor) {
-      setBrailleFeedback("Speech recognition not supported in this browser. Use Chrome/Edge or record audio below.");
+  const goToNextQuestion = () => {
+    if (!currentQuestion) return;
+    if (!selectedOption) {
+      setBrailleFeedback("Select an option first.");
       return;
     }
-    const rec = new SpeechRecognitionCtor();
-    rec.lang = "en-US";
-    rec.interimResults = false;
-    rec.maxAlternatives = 1;
-    setBrailleListening(true);
-    rec.onresult = (e) => {
-      const text = e.results[0][0].transcript.trim();
-      void verifySpokenText(text);
-    };
-    rec.onerror = () => {
-      setBrailleListening(false);
-      setBrailleFeedback("Speech capture error.");
-    };
-    rec.onend = () => setBrailleListening(false);
-    rec.start();
-  };
 
-  const recordAndUpload = async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setBrailleFeedback("Microphone not available.");
-      return;
+    if (selectedOption === currentQuestion.answer) {
+      setBrailleFeedback("Correct!");
+    } else {
+      setBrailleFeedback(`Incorrect. Correct answer: ${currentQuestion.answer}`);
     }
-    setBrailleLoading(true);
-    setBrailleFeedback("Recording 3 seconds…");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
-      const mr = new MediaRecorder(stream, { mimeType: mime });
-      const chunks: BlobPart[] = [];
-      mr.ondataavailable = (ev) => {
-        if (ev.data.size) chunks.push(ev.data);
-      };
-      await new Promise<void>((resolve, reject) => {
-        mr.onstop = () => resolve();
-        mr.onerror = () => reject(new Error("recorder"));
-        mr.start();
-        setTimeout(() => {
-          mr.stop();
-          stream.getTracks().forEach((t) => t.stop());
-        }, 3000);
-      });
-      const blob = new Blob(chunks, { type: mime });
-      const fd = new FormData();
-      fd.append("audio", blob, `speech.${mime.includes("webm") ? "webm" : "mp4"}`);
-      const res = await fetch(`${API_BASE}/braille/verify-audio`, { method: "POST", body: fd });
-      if (!res.ok) throw new Error(String(res.status));
-      const out = await res.json();
-      if (out.status === "correct") {
-        setBrailleFeedback(`Correct! (Whisper: ${out.transcript || out.spoken})`);
-        await fetchBrailleState();
-      } else if (out.status === "done") {
-        setBrailleFeedback("All done!");
-        await fetchBrailleState();
-      } else {
-        setBrailleFeedback(`Try again. Expected “${out.letter}”. Heard: “${out.transcript || out.spoken || ""}”`);
-      }
-    } catch {
-      setBrailleFeedback("Recording or upload failed. Ensure backend is running.");
+
+    if (quizIndex < BRAILLE_QUESTIONS.length - 1) {
+      setQuizIndex((prev) => prev + 1);
+      setSelectedOption(null);
+    } else {
+      setQuizIndex(BRAILLE_QUESTIONS.length);
+      setSelectedOption(null);
     }
-    setBrailleLoading(false);
   };
 
   return (
@@ -182,19 +95,19 @@ export default function InclusionLearning() {
       <div className="layout-grid">
         {/* Sidebar Nav */}
         <nav className="glass-card sidebar">
-        <button onClick={() => setActiveTab('sl-lessons')} className={`tab-btn ${activeTab === 'sl-lessons' ? 'active' : ''}`}>
+        <button onClick={() => setActiveTab('sl-lessons')} className={`tab-btn m-1 ${activeTab === 'sl-lessons' ? 'active' : ''}`}>
             <BookOpen className="icon-mr" /> Lessons
           </button>
          
           <div className="mt-4 mb-4 border-b border-white border-opacity-20"></div>
           <h3 className="text-secondary mb-2 pl-4 text-sm font-bold uppercase">Sign Language</h3>
-          <button onClick={() => setActiveTab('braille')} className={`tab-btn ${activeTab === 'braille' ? 'active' : ''}`}>
+          <button onClick={() => setActiveTab('braille')} className={`tab-btn m-1 ${activeTab === 'braille' ? 'active' : ''}`}>
             <Grip className="icon-mr" /> Braille Test
           </button>
-          <button onClick={() => setActiveTab('sl-quiz')} className={`tab-btn ${activeTab === 'sl-quiz' ? 'active' : ''}`}>
+          <button onClick={() => setActiveTab('sl-quiz')} className={`tab-btn m-1 ${activeTab === 'sl-quiz' ? 'active' : ''}`}>
             <CheckCircle className="icon-mr" /> AI Practice Quiz
           </button>
-          <button onClick={() => setActiveTab('sl-reallife')} className={`tab-btn ${activeTab === 'sl-reallife' ? 'active' : ''}`}>
+          <button onClick={() => setActiveTab('sl-reallife')} className={`tab-btn m-1 ${activeTab === 'sl-reallife' ? 'active' : ''}`}>
             <Target className="icon-mr" /> Real-life Situations
           </button>
         </nav>
@@ -203,72 +116,71 @@ export default function InclusionLearning() {
         <main className="glass-card content-area">
           {activeTab === 'braille' && (
             <div className="feature-panel animation-fade">
-              <h2><Grip className="icon-mr accent-text" /> Braille speech test</h2>
+              <h2><Grip className="icon-mr accent-text" /> Braille MCQ test</h2>
               <p className="desc-text">
-                Say the letter name that matches the Braille image (same logic as <code>braille/main.py</code>).
-                Use the Flask backend so images and Whisper checks work.
+                See the Braille image, pick one option
               </p>
 
               <div className="glass-card-inner flex-row wrap gap-4 align-center mb-4">
-                <button type="button" className="glass-btn" onClick={() => void fetchBrailleState()} disabled={brailleLoading}>
-                  Refresh state
-                </button>
-                <button type="button" className="glass-btn" onClick={() => void resetBraille()} disabled={brailleLoading}>
+                <button type="button" className="glass-btn m-1" onClick={resetBraille}>
                   <RotateCcw size={16} className="icon-mr" /> Reset progress
                 </button>
               </div>
 
-              {brailleState?.done ? (
-                <p className="accent-text text-lg">All dataset letters completed. Reset to practice again.</p>
-              ) : brailleState?.current ? (
-                <div className="flex-row wrap gap-6 align-start">
-                  <div className="glass-card-inner text-center" style={{ minWidth: "220px" }}>
-                    <p className="text-secondary mb-2">
-                      Letter {brailleState.index + 1} of {brailleState.total}: say the name of this character
-                    </p>
-                    <div
-                      className="mx-auto mb-3"
-                      style={{
-                        width: 200,
-                        height: 200,
-                        borderRadius: 12,
-                        overflow: "hidden",
-                        background: "rgba(0,0,0,0.06)",
-                      }}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={`${API_BASE}/braille/image/${encodeURIComponent(brailleState.current)}`}
-                        alt={`Braille for ${brailleState.current}`}
-                        style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                      />
+              {BRAILLE_QUESTIONS.length ? (
+                quizIndex >= BRAILLE_QUESTIONS.length ? (
+                  <p className="accent-text text-lg">Quiz completed. Reset progress to start again.</p>
+                ) : (
+                  <div className="flex-row wrap gap-18 align-start">
+                    <div className="glass-card-inner text-center" style={{ minWidth: "220px" }}>
+                      <p className="text-secondary mb-12">
+                        Question {quizIndex + 1} of {BRAILLE_QUESTIONS.length}
+                      </p>
+                      <div
+                        className="mx-auto mb-3"
+                        style={{
+                          width: 200,
+                          height: 200,
+                          borderRadius: 12,
+                          overflow: "hidden",
+                          background: "rgba(0,0,0,0.06)",
+                        }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={createBrailleImage(currentQuestion?.activeDots ?? [])}
+                          alt={`Braille question ${quizIndex + 1}`}
+                          style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                        />
+                      </div>
                     </div>
-                    <p className="text-xl font-bold">{brailleState.current}</p>
-                  </div>
-                  <div className="flex-1" style={{ minWidth: "260px" }}>
-                    <p className="mb-3 desc-text">
-                      <strong>Quick:</strong> speak the letter (e.g. “A” or “letter A”). Your browser may ask for mic access.
-                    </p>
-                    <div className="flex-row wrap gap-3 mb-3">
+                    <div className="flex-1" style={{ minWidth: "260px" }}>
+                      <p className="mb-4 desc-text"><strong>Select answer:</strong></p>
+                      <div className="flex-row wrap gap-1 mb-4">
+                        {(currentQuestion?.options ?? []).map((option, idx) => (
+                          <button
+                            key={option}
+                            type="button"
+                            className={selectedOption === option ? "primary-btn m-110" : "glass-btn m-1"}
+                            onClick={() => setSelectedOption(option)}
+                          >
+                            {String.fromCharCode(97 + idx)}. {option}
+                          </button>
+                        ))}
+                      </div>
                       <button
                         type="button"
-                        className="primary-btn"
-                        onClick={() => startBrowserSpeech()}
-                        disabled={brailleLoading || brailleListening}
+                        className="primary-btn m-1"
+                        onClick={goToNextQuestion}
                       >
-                        <Mic size={18} className="icon-mr" />
-                        {brailleListening ? "Listening…" : "Speak (browser)"}
+                        Next
                       </button>
-                      <button type="button" className="primary-btn" onClick={() => void recordAndUpload()} disabled={brailleLoading}>
-                        <Play size={18} className="icon-mr" />
-                        Record 3s (Whisper)
-                      </button>
+                      {brailleFeedback && <p className="accent-text mt-4">{brailleFeedback}</p>}
                     </div>
-                    {brailleFeedback && <p className="accent-text">{brailleFeedback}</p>}
                   </div>
-                </div>
+                )
               ) : (
-                <p className="text-secondary">{brailleFeedback || "Loading…"}</p>
+                <p className="text-secondary">No questions available.</p>
               )}
             </div>
           )}
@@ -283,7 +195,7 @@ export default function InclusionLearning() {
                      <Play size={48} className="camera-icon mb-2" />
                  </div>
                  <h3 className="mb-4 text-xl font-bold">Lesson 1: Greetings</h3>
-                 <button className="primary-btn">Start Practice Mode</button>
+                 <button className="primary-btn m-1">Start Practice Mode</button>
               </div>
             </div>
           )}

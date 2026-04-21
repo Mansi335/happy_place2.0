@@ -1,11 +1,14 @@
 #predict using that model
+# Use the same venv as training, e.g.: ml_env/bin/python sign_lang_check/predict.py
 
 import cv2
 import mediapipe as mp
 import numpy as np
 import os
+import tensorflow as tf
 from collections import deque
-from tensorflow.keras.models import load_model
+
+from landmarks import normalize_hand_xy
 
 ACTIONS = ['Hello', 'ThankYou', 'GoodMorning', 'Sorry', 'HowAreYou']
 SEQUENCE_LENGTH = 30
@@ -14,13 +17,30 @@ MODEL_DIR = os.path.join(BASE_DIR, 'model')
 MODEL_PATH = os.path.join(MODEL_DIR, 'lstm_model.h5')
 ACTIONS_PATH = os.path.join(MODEL_DIR, 'actions.npy')
 
+
+class CompatLSTM(tf.keras.layers.LSTM):
+    def __init__(self, *args, time_major=None, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+class CompatDense(tf.keras.layers.Dense):
+    """Ignore extra keys (e.g. quantization_config) saved by newer Keras in .h5."""
+
+    def __init__(self, *args, quantization_config=None, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
 if not os.path.exists(MODEL_PATH):
     raise FileNotFoundError(f"Model not found at {MODEL_PATH}. Run train_model.py first.")
 
 if os.path.exists(ACTIONS_PATH):
     ACTIONS = np.load(ACTIONS_PATH, allow_pickle=True).tolist()
 
-model = load_model(MODEL_PATH)
+model = tf.keras.models.load_model(
+    MODEL_PATH,
+    compile=False,
+    custom_objects={"LSTM": CompatLSTM, "Dense": CompatDense},
+)
 
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
@@ -69,8 +89,7 @@ while True:
                 for lm in hand_landmarks.landmark:
                     landmarks.append(lm.x)
                     landmarks.append(lm.y)
-                
-                sequence.append(landmarks)
+                sequence.append(normalize_hand_xy(np.array(landmarks, dtype=np.float32)))
                 if len(sequence) > SEQUENCE_LENGTH:
                     sequence.pop(0)
 
