@@ -6,6 +6,7 @@ import os
 import random
 import atexit
 import json
+import tempfile
 import urllib.request
 import urllib.error
 
@@ -166,6 +167,31 @@ def similar_sound():
 def similar_sound_audio(filename):
     sounds_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "similar_sound", "assets", "sounds"))
     return send_from_directory(sounds_dir, filename, as_attachment=False)
+
+
+@app.route("/api/image-description", methods=["POST"])
+def image_description():
+    uploaded = request.files.get("file")
+    if uploaded is None:
+        return jsonify({"error": "Missing image file"}), 400
+
+    suffix = os.path.splitext(uploaded.filename or "upload.jpg")[1] or ".jpg"
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            uploaded.save(tmp.name)
+            temp_path = tmp.name
+
+        from services.image_desc_service import describe_image
+        caption = describe_image(temp_path)
+        if isinstance(caption, str) and caption.lower().startswith("model not loaded"):
+            return jsonify({"error": caption}), 500
+        return jsonify({"caption": caption})
+    except Exception as exc:
+        return jsonify({"error": f"Image description failed: {exc}"}), 500
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 # -------- RUN -------- #

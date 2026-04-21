@@ -96,7 +96,13 @@ export default function AccessibilitySettings() {
               <div className="upload-area glass-card-inner">
                 <Video size={48} className="upload-icon mb-2 accent-text" />
                 <p>Drag and drop an image, or click to browse</p>
-                <button className="primary-btn mt-4">Capture Image</button>
+                <Link
+                  href="/image-description"
+                  className="primary-btn mt-4 inline-flex"
+                  style={{ textDecoration: "none" }}
+                >
+                  Capture Image
+                </Link>
               </div>
 
               <div className="description-result glass-card-inner mt-4">
