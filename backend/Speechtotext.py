@@ -2,6 +2,7 @@ import logging
 import os
 import subprocess
 import uuid
+from collections import defaultdict
 
 import librosa
 import numpy as np
@@ -59,10 +60,53 @@ def _detect_emotion(wav_path: str) -> str:
     if len(audio_array) < 1000:
         return "Unknown"
 
-    result = EMOTION_PIPELINE(audio_array)
-    if not result:
+    # Normalize and trim silence to reduce false "angry" spikes.
+    audio_array = librosa.util.normalize(audio_array)
+    trimmed, _ = librosa.effects.trim(audio_array, top_db=25)
+    if len(trimmed) >= 1000:
+        audio_array = trimmed
+
+    # Run chunked inference and aggregate by score for stability.
+    chunk_size = int(1.8 * 16000)  # ~1.8s
+    hop = int(0.9 * 16000)         # 50% overlap
+    scores = defaultdict(float)
+
+    if len(audio_array) < chunk_size:
+        chunks = [audio_array]
+    else:
+        chunks = []
+        for start in range(0, max(1, len(audio_array) - chunk_size + 1), hop):
+            chunks.append(audio_array[start:start + chunk_size])
+        if not chunks:
+            chunks = [audio_array]
+
+    for chunk in chunks:
+        result = EMOTION_PIPELINE(chunk, top_k=5)
+        if isinstance(result, list) and result and isinstance(result[0], dict):
+            for pred in result:
+                label = str(pred.get("label", "Unknown"))
+                score = float(pred.get("score", 0.0))
+                scores[label] += score
+
+    if not scores:
         return "Unknown"
-    return result[0].get("label", "Unknown")
+
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    best_label, best_score = ranked[0]
+    second_score = ranked[1][1] if len(ranked) > 1 else 0.0
+
+    # If prediction is weak/ambiguous, prefer neutral instead of overconfident anger.
+    if best_score < 0.85 or (best_score - second_score) < 0.12:
+        return "Neutral"
+
+    # Keep labels user-friendly.
+    label_map = {
+        "ang": "Angry",
+        "hap": "Happy",
+        "sad": "Sad",
+        "neu": "Neutral",
+    }
+    return label_map.get(best_label.lower(), best_label)
 
 
 def process_audio_file(input_path: str) -> dict:

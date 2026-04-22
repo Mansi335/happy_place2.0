@@ -654,3 +654,48 @@ body {
 .main-container.relative {
   position: relative;
 }
+
+/* Global voice assistant */
+.voice-assistant-panel {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+}
+
+.voice-toggle-btn {
+  background: rgba(40, 30, 20, 0.9);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+  padding: 0.65rem 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.voice-toggle-btn.active {
+  background: #059669;
+}
+
+.voice-last-command,
+.voice-error {
+  margin: 0;
+  font-size: 0.8rem;
+  max-width: 340px;
+  padding: 0.3rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+}
+
+.voice-error {
+  background: rgba(127, 29, 29, 0.85);
+}

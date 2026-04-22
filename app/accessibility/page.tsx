@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Mic, Image as ImageIcon, Video, HandMetal, MessageSquare, Camera } from "lucide-react";
 
 const API_BASE = "http://127.0.0.1:5000";
+const VOICE_EVENT_NAME = "happy-place-voice-command";
 
 export default function AccessibilitySettings() {
   const [activeTab, setActiveTab] = useState("sign-lang");
@@ -45,6 +46,79 @@ export default function AccessibilitySettings() {
     }
   }, [activeTab, isCameraOn]);
 
+  useEffect(() => {
+    const onVoiceCommand = (event: Event) => {
+      const customEvent = event as CustomEvent<{ command?: string }>;
+      const command = customEvent.detail?.command?.toLowerCase().trim() || "";
+      if (!command) return;
+
+      if (command.includes("open sign") || command.includes("sign tab")) {
+        setActiveTab("sign-lang");
+        speakText("Sign language tab opened.");
+        return;
+      }
+      if (command.includes("open speech") || command.includes("speech tab")) {
+        setActiveTab("speech");
+        speakText("Speech to text tab opened.");
+        return;
+      }
+      if (command.includes("open image") || command.includes("image tab")) {
+        setActiveTab("image");
+        speakText("Image description tab opened.");
+        return;
+      }
+
+      if (activeTab === "sign-lang") {
+        if (command.includes("start camera") || command.includes("enable camera")) {
+          void startCamera();
+          speakText("Starting camera.");
+          return;
+        }
+        if (command.includes("stop camera")) {
+          stopCamera();
+          speakText("Camera stopped.");
+          return;
+        }
+        if (command.includes("start realtime")) {
+          if (!isRealtimeOn) toggleRealtime();
+          speakText("Realtime translation started.");
+          return;
+        }
+        if (command.includes("stop realtime")) {
+          if (isRealtimeOn) toggleRealtime();
+          speakText("Realtime translation stopped.");
+          return;
+        }
+        if (command.includes("translate") || command.includes("detect sign")) {
+          void translateFrame();
+          return;
+        }
+        if (command.includes("speak output") || command.includes("read output")) {
+          speakText(signText);
+          return;
+        }
+      }
+
+      if (activeTab === "speech") {
+        if (command.includes("start recording") || command.includes("record speech")) {
+          void startSpeechRecording();
+          return;
+        }
+        if (command.includes("read transcript")) {
+          speakText(speechText);
+          return;
+        }
+      }
+
+      if (activeTab === "image" && (command.includes("capture image") || command.includes("open capture"))) {
+        window.location.href = "/image-description";
+      }
+    };
+
+    window.addEventListener(VOICE_EVENT_NAME, onVoiceCommand as EventListener);
+    return () => window.removeEventListener(VOICE_EVENT_NAME, onVoiceCommand as EventListener);
+  }, [activeTab, isRealtimeOn, signText, speechText]);
+
   const speakText = (text: string) => {
     if (!("speechSynthesis" in window) || !text) return;
     window.speechSynthesis.cancel();
@@ -80,12 +154,22 @@ export default function AccessibilitySettings() {
             method: "POST",
             body: formData,
           });
-          const data = await res.json();
-          if (!res.ok || data.status === "error") {
-            throw new Error(data.error || "Speech conversion failed");
+          let data: any = null;
+          try {
+            data = await res.json();
+          } catch {
+            const text = await res.text();
+            throw new Error(
+              text?.includes("<!doctype html")
+                ? "Speech backend route not available. Restart backend/app.py."
+                : text || "Speech conversion failed",
+            );
           }
-          setSpeechText(data.text || "No transcript");
-          setSpeechEmotion(data.emotion || "Unknown");
+          if (!res.ok || data?.status === "error") {
+            throw new Error(data?.error || "Speech conversion failed");
+          }
+          setSpeechText(data?.text || "No transcript");
+          setSpeechEmotion(data?.emotion || "Unknown");
           setSpeechStatus("Done");
         } catch (err: any) {
           setSpeechError(err?.message || "Speech conversion failed.");

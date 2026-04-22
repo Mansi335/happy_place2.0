@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 
 const PRIMARY_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:5000";
 const FALLBACK_BACKEND_URL = "http://localhost:5000";
+const VOICE_EVENT_NAME = "happy-place-voice-command";
 
 export default function ImageDescriptionPage() {
   const [caption, setCaption] = useState<string | null>(null);
@@ -50,6 +51,38 @@ export default function ImageDescriptionPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRealtime]);
+
+  useEffect(() => {
+    const onVoiceCommand = (event: Event) => {
+      const customEvent = event as CustomEvent<{ command?: string }>;
+      const command = customEvent.detail?.command?.toLowerCase().trim() || "";
+      if (!command) return;
+
+      if (command.includes("capture") || command.includes("describe now")) {
+        void captureAndDescribe();
+        return;
+      }
+
+      if (command.includes("start realtime")) {
+        setIsRealtime(true);
+        speakCaption("Realtime mode started.");
+        return;
+      }
+
+      if (command.includes("stop realtime")) {
+        setIsRealtime(false);
+        speakCaption("Realtime mode stopped.");
+        return;
+      }
+
+      if ((command.includes("read caption") || command.includes("speak caption")) && caption) {
+        speakCaption(caption);
+      }
+    };
+
+    window.addEventListener(VOICE_EVENT_NAME, onVoiceCommand as EventListener);
+    return () => window.removeEventListener(VOICE_EVENT_NAME, onVoiceCommand as EventListener);
+  }, [caption]);
 
   const speakCaption = (text: string) => {
     if (!("speechSynthesis" in window) || !text) return;

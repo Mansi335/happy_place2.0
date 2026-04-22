@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import VoiceAssistant from "@/components/VoiceAssistant";
 
 export const metadata: Metadata = {
   title: "Happy Place 2.0",
@@ -15,6 +16,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         {children}
+        <VoiceAssistant />
       </body>
     </html>
   );
