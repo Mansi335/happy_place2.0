@@ -14,6 +14,11 @@ export default function AccessibilitySettings() {
   const [signText, setSignText] = useState("Waiting for hand gesture...");
   const [signError, setSignError] = useState("");
   const [cameraStatus, setCameraStatus] = useState("Camera is off");
+  const [isRecording, setIsRecording] = useState(false);
+  const [speechText, setSpeechText] = useState("No transcript yet.");
+  const [speechEmotion, setSpeechEmotion] = useState("Unknown");
+  const [speechStatus, setSpeechStatus] = useState("Ready");
+  const [speechError, setSpeechError] = useState("");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -21,6 +26,8 @@ export default function AccessibilitySettings() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inFlightRef = useRef(false);
   const lastSpokenRef = useRef("");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const speechChunksRef = useRef<BlobPart[]>([]);
 
   useEffect(() => {
     return () => {
@@ -42,6 +49,59 @@ export default function AccessibilitySettings() {
     if (!("speechSynthesis" in window) || !text) return;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  };
+
+  const startSpeechRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+      const mr = new MediaRecorder(stream, { mimeType });
+      speechChunksRef.current = [];
+      mediaRecorderRef.current = mr;
+      setSpeechError("");
+      setSpeechStatus("Recording...");
+      setIsRecording(true);
+
+      mr.ondataavailable = (event) => {
+        if (event.data.size > 0) speechChunksRef.current.push(event.data);
+      };
+
+      mr.onstop = async () => {
+        setIsRecording(false);
+        setSpeechStatus("Processing...");
+        stream.getTracks().forEach((t) => t.stop());
+
+        const blob = new Blob(speechChunksRef.current, { type: mimeType });
+        const formData = new FormData();
+        formData.append("audio", blob, mimeType.includes("webm") ? "speech.webm" : "speech.mp4");
+
+        try {
+          const res = await fetch(`${API_BASE}/speech/convert`, {
+            method: "POST",
+            body: formData,
+          });
+          const data = await res.json();
+          if (!res.ok || data.status === "error") {
+            throw new Error(data.error || "Speech conversion failed");
+          }
+          setSpeechText(data.text || "No transcript");
+          setSpeechEmotion(data.emotion || "Unknown");
+          setSpeechStatus("Done");
+        } catch (err: any) {
+          setSpeechError(err?.message || "Speech conversion failed.");
+          setSpeechStatus("Failed");
+        }
+      };
+
+      mr.start();
+      setTimeout(() => {
+        if (mr.state !== "inactive") mr.stop();
+      }, 3500);
+    } catch {
+      setSpeechError("Microphone permission denied or unavailable.");
+      setSpeechStatus("Failed");
+      setIsRecording(false);
+    }
   };
 
   const startCamera = async () => {
@@ -255,17 +315,23 @@ export default function AccessibilitySettings() {
               <p className="desc-text">Speak to generate text along with detected emotional undertones.</p>
 
               <div className="mic-area glass-card-inner">
-                <button className="record-btn pulsing mb-4">
+                <button
+                  className="record-btn pulsing mb-4"
+                  onClick={() => void startSpeechRecording()}
+                  disabled={isRecording}
+                >
                   <Mic size={32} />
                 </button>
-                <p>Listening...</p>
+                <p>{isRecording ? "Listening..." : "Tap mic to record 3.5s"}</p>
+                <p className="text-secondary mt-2">{speechStatus}</p>
+                {speechError && <p className="accent-text mt-2">{speechError}</p>}
               </div>
 
               <div className="transcript-box glass-card-inner mt-4">
                 <div className="emotion-indicator mb-2">
-                  <span className="emotion joy glass-badge">😊 Joyful (85%)</span>
+                  <span className="emotion joy glass-badge">Emotion: {speechEmotion}</span>
                 </div>
-                <p className="transcript-text text-lg italic">"I am so excited to use this new application!"</p>
+                <p className="transcript-text text-lg italic">"{speechText}"</p>
               </div>
             </div>
           )}

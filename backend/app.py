@@ -12,6 +12,12 @@ import urllib.error
 
 app = Flask(__name__)
 CORS(app)
+try:
+    from routes.speech import speech_bp
+    app.register_blueprint(speech_bp)
+except Exception as exc:
+    # Keep existing app connectivity even if optional speech module fails.
+    print(f"Warning: speech blueprint not loaded: {exc}")
 
 # allow importing from project root
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

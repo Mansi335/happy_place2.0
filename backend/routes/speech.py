@@ -1,41 +1,30 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from services.speech_service import process_audio
-import shutil
-import os
-import uuid
+from flask import Blueprint, jsonify, request
 
-router = APIRouter()
+from Speechtotext import process_audio_file
+from utils.file_handler import save_uploaded_file
 
-TEMP_DIR = "temp_audio"
-os.makedirs(TEMP_DIR, exist_ok=True)
 
-@router.post("/")
-async def analyze_speech(file: UploadFile = File(...)):
+speech_bp = Blueprint("speech", __name__, url_prefix="/speech")
+
+
+@speech_bp.route("/convert", methods=["POST"])
+def convert_speech():
     """
-    Endpoint that accepts an audio file (wav, webm, etc) and returns text + emotion.
+    Accepts multipart form-data with key: audio
+    Returns speech-to-text and emotion prediction JSON.
     """
-    if not file:
-        raise HTTPException(status_code=400, detail="No audio file provided")
+    if "audio" not in request.files:
+        return jsonify({"status": "error", "error": "No audio file provided"}), 400
 
-    # Save the file temporarily
-    file_ext = file.filename.split(".")[-1] if "." in file.filename else "wav"
-    temp_filename = f"{uuid.uuid4()}.{file_ext}"
-    temp_filepath = os.path.join(TEMP_DIR, temp_filename)
-    
+    uploaded_file = request.files["audio"]
+    if uploaded_file.filename is None or uploaded_file.filename.strip() == "":
+        return jsonify({"status": "error", "error": "Empty file name"}), 400
+
     try:
-        with open(temp_filepath, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            
-        # Optional: if the file is WebM from the browser, you might need to convert to WAV using pydub/ffmpeg
-        # For simplicity, we assume we receive standard wav or can process it directly.
-        # It's better to force a conversion in production.
-            
-        result = process_audio(temp_filepath)
-        return result
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        # Cleanup
-        if os.path.exists(temp_filepath):
-            os.remove(temp_filepath)
+        saved_path = save_uploaded_file(uploaded_file, temp_dir="temp")
+        output = process_audio_file(saved_path)
+        if output.get("status") == "error":
+            return jsonify(output), 500
+        return jsonify(output), 200
+    except Exception as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 500
