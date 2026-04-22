@@ -78,3 +78,7 @@ yarn-error.log*
 # ----------------------------
 coverage/
 dist/
+
+
+.env
+.env.local
