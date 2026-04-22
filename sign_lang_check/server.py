@@ -95,6 +95,18 @@ def extract_landmarks(frame_bgr):
     return np.array(points, dtype=np.float32)
 
 
+def predict_single_frame(frame_bgr):
+    landmarks = extract_landmarks(frame_bgr)
+    if landmarks is None:
+        return None, None
+    sequence = np.array([landmarks for _ in range(SEQUENCE_LENGTH)], dtype=np.float32)
+    sequence_np = np.expand_dims(sequence, axis=0)
+    probs = MODEL.predict(sequence_np, verbose=0)[0]
+    pred_idx = int(np.argmax(probs))
+    confidence = float(probs[pred_idx])
+    return ACTIONS[pred_idx], confidence
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"ok": True, "actions": ACTIONS})
@@ -175,18 +187,10 @@ def predict():
         )
 
     state["sequence"].append(landmarks)
+    # One-go mode: pad sequence with current landmarks instead of waiting for 30 frames.
     if len(state["sequence"]) < SEQUENCE_LENGTH:
-        return jsonify(
-            {
-                "done": False,
-                "status": f"Collecting frames: {len(state['sequence'])}/{SEQUENCE_LENGTH}",
-                "target_word": ACTIONS[target_idx],
-                "target_idx": target_idx,
-                "correct_streak": state["correct_streak"],
-                "streak_required": STREAK_REQUIRED,
-                "score": state["score"],
-            }
-        )
+        while len(state["sequence"]) < SEQUENCE_LENGTH:
+            state["sequence"].append(landmarks)
 
     sequence_np = np.expand_dims(np.array(state["sequence"], dtype=np.float32), axis=0)
     probs = MODEL.predict(sequence_np, verbose=0)[0]
@@ -232,5 +236,38 @@ def predict():
     )
 
 
+@app.route("/sign-lang/translate", methods=["POST"])
+def translate():
+    data = request.get_json(silent=True) or {}
+    image_base64 = data.get("image")
+    if not image_base64:
+        return jsonify({"error": "Missing image"}), 400
+
+    frame = decode_data_url_to_bgr(image_base64)
+    if frame is None:
+        return jsonify({"error": "Bad frame data"}), 400
+
+    predicted_word, confidence = predict_single_frame(frame)
+    if predicted_word is None:
+        return jsonify(
+            {
+                "ok": True,
+                "predicted_word": "Gesture unclear.",
+                "confidence": 0.0,
+                "status": "Show one clear hand in camera",
+            }
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "predicted_word": predicted_word,
+            "confidence": confidence,
+            "status": "Translated from single frame",
+        }
+    )
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    port = int(os.environ.get("SIGN_LANG_PORT", "5001"))
+    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)

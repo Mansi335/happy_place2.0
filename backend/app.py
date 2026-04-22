@@ -24,11 +24,28 @@ SIGN_SERVER_PROCESS = None
 
 def _ml_env_python():
     candidates = [
+        os.path.join(ROOT_DIR, "cv_env", "bin", "python"),
+        os.path.join(ROOT_DIR, "cv_env", "bin", "python3"),
         os.path.join(ROOT_DIR, "ml_env", "bin", "python"),
         os.path.join(ROOT_DIR, "ml_env", "bin", "python3"),
         "python3",
         "python",
     ]
+    for candidate in candidates:
+        if os.path.isabs(candidate) and not os.path.exists(candidate):
+            continue
+        try:
+            proc = subprocess.run(
+                [candidate, "-c", "import tensorflow"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            if proc.returncode == 0:
+                return candidate
+        except Exception:
+            continue
+    # Last resort
     for candidate in candidates:
         if os.path.isabs(candidate):
             if os.path.exists(candidate):
@@ -141,6 +158,12 @@ def sign_lang_reset():
 def sign_lang_predict():
     payload = request.get_json(silent=True) or {}
     return _proxy_to_sign_server("/sign-lang/predict", method="POST", payload=payload)
+
+
+@app.route("/sign-lang/translate", methods=["POST"])
+def sign_lang_translate():
+    payload = request.get_json(silent=True) or {}
+    return _proxy_to_sign_server("/sign-lang/translate", method="POST", payload=payload)
 
 
 @app.route("/sign-lang/health", methods=["GET"])
